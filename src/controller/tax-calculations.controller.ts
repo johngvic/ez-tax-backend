@@ -27,6 +27,7 @@ export class TaxCalculationsController {
     return { status: 'Job is running' };
   }
 
+  @IsAdmin()
   @UseGuards(JwtAuthGuard)
   @Get('exclusao-pis-cofins')
   async getJobs(@Req() request: Request) {
@@ -34,6 +35,7 @@ export class TaxCalculationsController {
     return await this.taxCalculationsService.getJobs(userId);
   }
 
+  @IsAdmin()
   @UseGuards(JwtAuthGuard)
   @Post('exclusao-pis-cofins')
   @UseInterceptors(FileInterceptor('file', { storage: memoryStorage() }))
@@ -56,6 +58,7 @@ export class TaxCalculationsController {
     );
   }
 
+  @IsAdmin()
   @UseGuards(JwtAuthGuard)
   @Get('exclusao-pis-cofins/:calculationId/download')
   async downloadJobResult(@Req() request: Request) {
