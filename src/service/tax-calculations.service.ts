@@ -18,11 +18,12 @@ import {
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { DynamoDBClient, QueryCommand } from '@aws-sdk/client-dynamodb';
-import { Workbook } from 'exceljs';
+import { stream } from 'exceljs';
+import { Readable } from 'stream';
 
 @Injectable()
 export class TaxCalculationsService {
-  constructor() {}
+  constructor() { }
 
   clientConfig = {
     region: process.env.AWS_REGION,
@@ -36,27 +37,59 @@ export class TaxCalculationsService {
 
   private async convertXlsxToCsvStream(
     file: Express.Multer.File,
-    delimiter: string,
-  ): Promise<{ csv: string, cnpj: string }> {
-    const workbook = new Workbook();
-
-    await workbook.xlsx.load(file.buffer as any);
-
-    const worksheet = workbook.worksheets[0];
-    const rows: string[] = [];
-
-    worksheet.eachRow({ includeEmpty: false }, async (row, _) => {
-      const csvRow = (row.values as []).slice(1).map((val) => {
-        if (val === null || val === undefined) return '';
-        const strVal = String(val);
-        return strVal.includes(delimiter) || strVal.includes('"')
-          ? `"${strVal.replace(/"/g, '""')}"`
-          : strVal;
-      });
-      rows.push(csvRow.join(delimiter));
+    delimiter: string = ',',
+  ): Promise<{ csv: string; cnpj: string }> {
+    const bufferStream = Readable.from(file.buffer);
+    const workbookReader = new stream.xlsx.WorkbookReader(bufferStream, {
+      sharedStrings: 'cache',
     });
 
-    return { csv: rows.join('\n'), cnpj: worksheet.getCell('A2').text };
+    const csvLines: string[] = [];
+    let cnpj = '';
+    let rowCount = 0;
+    let processed = false;
+
+    for await (const worksheet of workbookReader) {
+      if (processed) break;
+
+      for await (const row of worksheet) {
+        rowCount++;
+        const values = (row.values as any[]).slice(1);
+
+        const csvRow = values.map((val: any) => {
+          if (val == null || val === '') return '';
+          const strVal = String(val).trim();
+          if (
+            strVal.includes(delimiter) ||
+            strVal.includes('"') ||
+            strVal.includes('\n') ||
+            strVal.includes('\r')
+          ) {
+            return `"${strVal.replace(/"/g, '""')}"`;
+          }
+
+          return strVal;
+        });
+
+        csvLines.push(csvRow.join(delimiter));
+
+        if (rowCount === 2) {
+          cnpj = String(values[0] ?? '').trim();
+        }
+      }
+
+      processed = true;
+      break;
+    }
+
+    if (csvLines.length === 0) {
+      throw new Error('Nenhuma linha encontrada na planilha');
+    }
+
+    return {
+      csv: csvLines.join('\n'),
+      cnpj,
+    };
   }
 
   async startExclusaoPisCofinsJob(
@@ -165,11 +198,11 @@ export class TaxCalculationsService {
       };
       const data = await dynamoDBClient.send(new QueryCommand(params));
       const item = data.Items?.[0];
-      
+
       if (!item) {
         throw new NotFoundException('Calculation not found');
       }
-      
+
       const command = new GetObjectCommand({
         Bucket: 'ez-tax',
         Key: `exclusao-pis-cofins/${userId}/${calculationId}/${item.cnpj.S!}.pdf`,
