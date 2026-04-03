@@ -94,10 +94,10 @@ export class TaxCalculationsService {
 
   async startExclusaoPisCofinsJob(
     userId: string,
-    file: Express.Multer.File,
+    files: Express.Multer.File[],
   ): Promise<ExclusaoPisCofinsCalculationResponse> {
     this.logger.log(
-      `Received file: ${file.originalname}, size: ${file.size} bytes`,
+      `Received ${files.length} file(s): ${files.map((f) => f.originalname).join(', ')}`,
     );
     const dynamoDBClient = new DynamoDBClient(this.clientConfig);
     const s3Client = new S3Client(this.clientConfig);
@@ -106,14 +106,27 @@ export class TaxCalculationsService {
       const calculationId = ulid();
       const createdAt = new Date().toISOString();
       const status = ExclusaoPisCofinsStatus.Pending;
-      const { csv, cnpj } = await this.convertXlsxToCsvStream(file, '¦');
 
-      const s3Command = new PutObjectCommand({
-        Bucket: 'ez-tax',
-        Key: `exclusao-pis-cofins/${userId}/${calculationId}/raw.csv`,
-        Body: csv,
-        ContentType: 'csv',
-      });
+      const fileData: Array<{ filename: string; size: number }> = [];
+      const totalSize = files.reduce((sum, f) => sum + f.size, 0);
+
+      for (let index = 0; index < files.length; index++) {
+        const file = files[index];
+        this.logger.log(`Uploading file ${index + 1}/${files.length}: ${file.originalname}`);
+
+        const s3Command = new PutObjectCommand({
+          Bucket: 'ez-tax',
+          Key: `exclusao-pis-cofins/${userId}/${calculationId}/files/${index + 1}_${file.originalname}`,
+          Body: file.buffer,
+          ContentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        });
+
+        await s3Client.send(s3Command);
+        fileData.push({
+          filename: file.originalname,
+          size: file.size,
+        });
+      }
 
       const dynamoDBCommand = new PutCommand({
         TableName: 'tax-calculations',
@@ -121,17 +134,17 @@ export class TaxCalculationsService {
           userId,
           calculationId,
           name: 'exclusao-pis-cofins',
-          fileSize: file.size,
+          fileCount: files.length,
+          totalFileSize: totalSize,
+          files: fileData,
           status,
-          cnpj,
           createdAt,
         },
       });
 
-      await s3Client.send(s3Command);
       await dynamoDBClient.send(dynamoDBCommand);
 
-      this.logger.log(`Record and files saved for: ${calculationId}`);
+      this.logger.log(`Record and ${files.length} file(s) saved for: ${calculationId}`);
 
       return {
         calculationId,

@@ -2,13 +2,13 @@ import {
   Controller,
   Post,
   UseInterceptors,
-  UploadedFile,
+  UploadedFiles,
   BadRequestException,
   Get,
   UseGuards,
   Req,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { FilesInterceptor } from '@nestjs/platform-express';
 import { TaxCalculationsService } from 'src/service/tax-calculations.service';
 import { memoryStorage } from 'multer';
 import { JwtAuthGuard } from 'src/common/guards/JwtAuthGuard';
@@ -38,23 +38,27 @@ export class TaxCalculationsController {
   @IsAdmin()
   @UseGuards(JwtAuthGuard)
   @Post('exclusao-pis-cofins')
-  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage() }))
+  @UseInterceptors(FilesInterceptor('files', 5, { storage: memoryStorage() }))
   async startExclusaoPisCofinsJob(
     @Req() request: Request,
-    @UploadedFile() file: Express.Multer.File,
+    @UploadedFiles() files: Express.Multer.File[],
   ) {
-    if (!file) throw new BadRequestException('File is required');
-    if (
-      !file.originalname ||
-      !file.originalname.toLowerCase().endsWith('.xlsx')
-    ) {
-      throw new BadRequestException('Only .xlsx files are allowed');
+    if (!files || files.length === 0) throw new BadRequestException('At least one file is required');
+    if (files.length > 5) throw new BadRequestException('Maximum 5 files allowed');
+    
+    for (const file of files) {
+      if (
+        !file.originalname ||
+        !file.originalname.toLowerCase().endsWith('.xlsx')
+      ) {
+        throw new BadRequestException('Only .xlsx files are allowed');
+      }
     }
 
     const userId = (request as any).user.sub;
     return await this.taxCalculationsService.startExclusaoPisCofinsJob(
       userId,
-      file,
+      files,
     );
   }
 
