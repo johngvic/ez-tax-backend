@@ -113,7 +113,12 @@ export class TaxCalculationsService {
         },
       };
       const data = await dynamoDBClient.send(new QueryCommand(params));
-      return (data.Items || []).map((item) => ({
+
+      const sortedItems = (data.Items || []).sort((a, b) => {
+        return (b.createdAt.S || '').localeCompare(a.createdAt.S || '');
+      });
+
+      return (sortedItems || []).map((item) => ({
         calculationId: item.calculationId.S!,
         status: item.status.S! as ExclusaoPisCofinsStatus,
         createdAt: item.createdAt.S!,
