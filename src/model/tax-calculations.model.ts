@@ -9,7 +9,7 @@ export enum ExclusaoPisCofinsStatus {
   Failed = 'FAILED',
 }
 
-export interface ExclusaoPisCofinsCalculationResponse {
+export interface ExclusaoPisCofinsCalculation {
   calculationId: string;
   status: ExclusaoPisCofinsStatus;
   pdfUrl?: string;
@@ -18,4 +18,10 @@ export interface ExclusaoPisCofinsCalculationResponse {
   updatedAt?: string;
   cnpj?: string;
   type: TaxCalculationType;
+}
+
+export interface ExclusaoPisCofinsCalculationResponse {
+  data: ExclusaoPisCofinsCalculation[];
+  nextCursor?: string;
+  hasNext: boolean;
 }

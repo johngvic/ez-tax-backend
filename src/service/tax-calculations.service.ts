@@ -3,9 +3,11 @@ import {
   Logger,
   InternalServerErrorException,
   NotFoundException,
+  BadRequestException,
 } from '@nestjs/common';
 import { ulid } from 'ulid';
 import {
+  ExclusaoPisCofinsCalculation,
   ExclusaoPisCofinsCalculationResponse,
   ExclusaoPisCofinsStatus,
   TaxCalculationType,
@@ -17,7 +19,11 @@ import {
   S3Client,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { DynamoDBClient, QueryCommand } from '@aws-sdk/client-dynamodb';
+import {
+  DynamoDBClient,
+  QueryCommand,
+  QueryCommandInput,
+} from '@aws-sdk/client-dynamodb';
 
 @Injectable()
 export class TaxCalculationsService {
@@ -36,7 +42,7 @@ export class TaxCalculationsService {
   async startExclusaoPisCofinsJob(
     userId: string,
     files: Express.Multer.File[],
-  ): Promise<ExclusaoPisCofinsCalculationResponse> {
+  ): Promise<ExclusaoPisCofinsCalculation> {
     this.logger.log(
       `Received ${files.length} file(s): ${files.map((f) => f.originalname).join(', ')}`,
     );
@@ -47,7 +53,7 @@ export class TaxCalculationsService {
       const calculationId = ulid();
       const createdAt = new Date().toISOString();
       const status = ExclusaoPisCofinsStatus.Pending;
-
+      
       const fileData: Array<{ filename: string; size: number }> = [];
       const totalSize = files.reduce((sum, f) => sum + f.size, 0);
 
@@ -102,23 +108,31 @@ export class TaxCalculationsService {
 
   async getJobs(
     userId: string,
-  ): Promise<ExclusaoPisCofinsCalculationResponse[]> {
+    limit: number = 10,
+    exclusiveStartKey?: string,
+  ): Promise<ExclusaoPisCofinsCalculationResponse> {
     const dynamoDBClient = new DynamoDBClient(this.clientConfig);
     try {
-      const params = {
+      const params: QueryCommandInput = {
         TableName: 'tax-calculations',
         KeyConditionExpression: 'userId = :userId',
         ExpressionAttributeValues: {
           ':userId': { S: userId },
         },
+        Limit: limit,
+        ScanIndexForward: false,
       };
-      const data = await dynamoDBClient.send(new QueryCommand(params));
 
-      const sortedItems = (data.Items || []).sort((a, b) => {
-        return (b.createdAt.S || '').localeCompare(a.createdAt.S || '');
-      });
+      if (exclusiveStartKey) {
+        try {
+          params['ExclusiveStartKey'] = JSON.parse(exclusiveStartKey);
+        } catch {
+          throw new BadRequestException('Invalid exclusiveStartKey');
+        }
+      }
 
-      return (sortedItems || []).map((item) => ({
+      const result = await dynamoDBClient.send(new QueryCommand(params));
+      const items = (result.Items || []).map((item) => ({
         calculationId: item.calculationId.S!,
         status: item.status.S! as ExclusaoPisCofinsStatus,
         createdAt: item.createdAt.S!,
@@ -128,6 +142,12 @@ export class TaxCalculationsService {
         cnpj: item.cnpj ? item.cnpj.S : undefined,
         type: TaxCalculationType.ExclusaoPisCofins,
       }));
+
+      return {
+        data: items,
+        nextCursor: result.LastEvaluatedKey ? JSON.stringify(result.LastEvaluatedKey) : undefined,
+        hasNext: !!result.LastEvaluatedKey,
+      }
     } catch (error) {
       this.logger.error(`Error fetching jobs for user ${userId}: ${error}`);
       throw new InternalServerErrorException('Failed to fetch jobs');

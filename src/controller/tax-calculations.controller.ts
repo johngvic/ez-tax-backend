@@ -7,6 +7,7 @@ import {
   Get,
   UseGuards,
   Req,
+  Query,
 } from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { TaxCalculationsService } from 'src/service/tax-calculations.service';
@@ -30,9 +31,23 @@ export class TaxCalculationsController {
   @IsAdmin()
   @UseGuards(JwtAuthGuard)
   @Get('exclusao-pis-cofins')
-  async getJobs(@Req() request: Request) {
+  async getJobs(
+    @Req() request: Request,
+    @Query('limit') limit?: string,
+    @Query('exclusiveStartKey') exclusiveStartKey?: string,
+  ) {
     const userId = (request as any).user.sub;
-    return await this.taxCalculationsService.getJobs(userId);
+    const parsedLimit = limit ? Number(limit) : 10;
+
+    if (limit && (!Number.isInteger(parsedLimit) || parsedLimit <= 0)) {
+      throw new BadRequestException('limit must be a positive integer');
+    }
+
+    return await this.taxCalculationsService.getJobs(
+      userId,
+      parsedLimit,
+      exclusiveStartKey,
+    );
   }
 
   @IsAdmin()
