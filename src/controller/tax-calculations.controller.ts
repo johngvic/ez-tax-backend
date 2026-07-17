@@ -8,6 +8,7 @@ import {
   UseGuards,
   Req,
   Query,
+  Body,
 } from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { TaxCalculationsService } from 'src/service/tax-calculations.service';
@@ -57,6 +58,7 @@ export class TaxCalculationsController {
   async startExclusaoPisCofinsJob(
     @Req() request: Request,
     @UploadedFiles() files: Express.Multer.File[],
+    @Body('styled') isStyled: string,
   ) {
     if (!files || files.length === 0) throw new BadRequestException('At least one file is required');
     if (files.length > 5) throw new BadRequestException('Maximum 5 files allowed');
@@ -71,9 +73,12 @@ export class TaxCalculationsController {
     }
 
     const userId = (request as any).user.sub;
+    const styled = isStyled === 'true';
+
     return await this.taxCalculationsService.startExclusaoPisCofinsJob(
       userId,
       files,
+      styled
     );
   }
 

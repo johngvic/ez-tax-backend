@@ -42,6 +42,7 @@ export class TaxCalculationsService {
   async startExclusaoPisCofinsJob(
     userId: string,
     files: Express.Multer.File[],
+    styled: boolean
   ): Promise<ExclusaoPisCofinsCalculation> {
     this.logger.log(
       `Received ${files.length} file(s): ${files.map((f) => f.originalname).join(', ')}`,
@@ -83,6 +84,7 @@ export class TaxCalculationsService {
           name: 'exclusao-pis-cofins',
           fileCount: files.length,
           fileSize: totalSize,
+          styled,
           status,
           createdAt,
         },
