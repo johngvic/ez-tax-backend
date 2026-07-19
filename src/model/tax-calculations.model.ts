@@ -1,27 +1,28 @@
 export enum TaxCalculationType {
   ExclusaoPisCofins = 'EXCLUSAO_PIS_COFINS',
+  RevisaoPisCofins  = 'REVISAO_PIS_COFINS'
 }
 
-export enum ExclusaoPisCofinsStatus {
+export enum TaxCalculationStatus {
   Pending = 'PENDING',
   Processing = 'PROCESSING',
   Completed = 'COMPLETED',
   Failed = 'FAILED',
 }
 
-export interface ExclusaoPisCofinsCalculation {
+export interface TaxCalculation {
   calculationId: string;
-  status: ExclusaoPisCofinsStatus;
+  status: TaxCalculationStatus;
   pdfUrl?: string;
   fileSize?: number;
   createdAt: string;
   updatedAt?: string;
   cnpj?: string;
-  type: TaxCalculationType;
+  calculationType: TaxCalculationType;
 }
 
-export interface ExclusaoPisCofinsCalculationResponse {
-  data: ExclusaoPisCofinsCalculation[];
+export interface TaxCalculationResponse {
+  data: TaxCalculation[];
   nextCursor?: string;
   hasNext: boolean;
 }

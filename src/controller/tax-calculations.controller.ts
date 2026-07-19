@@ -15,6 +15,7 @@ import { TaxCalculationsService } from 'src/service/tax-calculations.service';
 import { memoryStorage } from 'multer';
 import { JwtAuthGuard } from 'src/common/guards/JwtAuthGuard';
 import { IsAdmin } from 'src/common/guards/is-admin.decorator';
+import { TaxCalculationType } from 'src/model/tax-calculations.model';
 
 @Controller('tax-calculations')
 export class TaxCalculationsController {
@@ -31,8 +32,8 @@ export class TaxCalculationsController {
 
   @IsAdmin()
   @UseGuards(JwtAuthGuard)
-  @Get('exclusao-pis-cofins')
-  async getJobs(
+  @Get()
+  async getTaxCalculations(
     @Req() request: Request,
     @Query('limit') limit?: string,
     @Query('exclusiveStartKey') exclusiveStartKey?: string,
@@ -44,7 +45,7 @@ export class TaxCalculationsController {
       throw new BadRequestException('limit must be a positive integer');
     }
 
-    return await this.taxCalculationsService.getJobs(
+    return await this.taxCalculationsService.getTaxCalculations(
       userId,
       parsedLimit,
       exclusiveStartKey,
@@ -53,12 +54,13 @@ export class TaxCalculationsController {
 
   @IsAdmin()
   @UseGuards(JwtAuthGuard)
-  @Post('exclusao-pis-cofins')
+  @Post()
   @UseInterceptors(FilesInterceptor('files', 5, { storage: memoryStorage() }))
-  async startExclusaoPisCofinsJob(
+  async runTaxCalculation(
     @Req() request: Request,
     @UploadedFiles() files: Express.Multer.File[],
     @Body('styled') isStyled: string,
+    @Body('calculationType') calculationType: string,
   ) {
     if (!files || files.length === 0) throw new BadRequestException('At least one file is required');
     if (files.length > 5) throw new BadRequestException('Maximum 5 files allowed');
@@ -75,19 +77,20 @@ export class TaxCalculationsController {
     const userId = (request as any).user.sub;
     const styled = isStyled === 'true';
 
-    return await this.taxCalculationsService.startExclusaoPisCofinsJob(
+    return await this.taxCalculationsService.runTaxCalculation(
       userId,
       files,
-      styled
+      styled,
+      calculationType as TaxCalculationType
     );
   }
 
   @IsAdmin()
   @UseGuards(JwtAuthGuard)
-  @Get('exclusao-pis-cofins/:calculationId/download')
-  async downloadJobResult(@Req() request: Request) {
+  @Get(':calculationId/download')
+  async downloadTaxCalculation(@Req() request: Request) {
     const userId = (request as any).user.sub;
     const calculationId = (request as any).params.calculationId;
-    return await this.taxCalculationsService.downloadJobResult(userId, calculationId);
+    return await this.taxCalculationsService.downloadTaxCalculation(userId, calculationId);
   }
 }

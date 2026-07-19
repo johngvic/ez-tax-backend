@@ -7,9 +7,9 @@ import {
 } from '@nestjs/common';
 import { ulid } from 'ulid';
 import {
-  ExclusaoPisCofinsCalculation,
-  ExclusaoPisCofinsCalculationResponse,
-  ExclusaoPisCofinsStatus,
+  TaxCalculation,
+  TaxCalculationResponse,
+  TaxCalculationStatus,
   TaxCalculationType,
 } from 'src/model/tax-calculations.model';
 import { PutCommand } from '@aws-sdk/lib-dynamodb';
@@ -39,11 +39,12 @@ export class TaxCalculationsService {
 
   private readonly logger = new Logger(TaxCalculationsService.name);
 
-  async startExclusaoPisCofinsJob(
+  async runTaxCalculation(
     userId: string,
     files: Express.Multer.File[],
-    styled: boolean
-  ): Promise<ExclusaoPisCofinsCalculation> {
+    styled: boolean,
+    calculationType: TaxCalculationType
+  ): Promise<TaxCalculation> {
     this.logger.log(
       `Received ${files.length} file(s): ${files.map((f) => f.originalname).join(', ')}`,
     );
@@ -53,18 +54,19 @@ export class TaxCalculationsService {
     try {
       const calculationId = ulid();
       const createdAt = new Date().toISOString();
-      const status = ExclusaoPisCofinsStatus.Pending;
+      const status = TaxCalculationStatus.Pending;
       
       const fileData: Array<{ filename: string; size: number }> = [];
       const totalSize = files.reduce((sum, f) => sum + f.size, 0);
 
       for (let index = 0; index < files.length; index++) {
         const file = files[index];
+        const bucketPrefix = `${calculationType.replaceAll('_','-').toLowerCase()}`;
         this.logger.log(`Uploading file ${index + 1}/${files.length}: ${file.originalname}`);
 
         const s3Command = new PutObjectCommand({
           Bucket: 'ez-tax',
-          Key: `exclusao-pis-cofins/${userId}/${calculationId}/files/${index + 1}_${file.originalname}`,
+          Key: `${bucketPrefix}/${userId}/${calculationId}/files/${index + 1}_${file.originalname}`,
           Body: file.buffer,
           ContentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         });
@@ -81,7 +83,7 @@ export class TaxCalculationsService {
         Item: {
           userId,
           calculationId,
-          name: 'exclusao-pis-cofins',
+          name: calculationType,
           fileCount: files.length,
           fileSize: totalSize,
           styled,
@@ -98,21 +100,21 @@ export class TaxCalculationsService {
         calculationId,
         status,
         createdAt,
-        type: TaxCalculationType.ExclusaoPisCofins,
+        calculationType
       };
     } catch (error) {
       this.logger.error(`Error: ${error}`);
       throw new InternalServerErrorException(
-        'Failed to start exclusao-pis-cofins job',
+        'Failed to start tax calculation',
       );
     }
   }
 
-  async getJobs(
+  async getTaxCalculations(
     userId: string,
     limit: number = 10,
     exclusiveStartKey?: string,
-  ): Promise<ExclusaoPisCofinsCalculationResponse> {
+  ): Promise<TaxCalculationResponse> {
     const dynamoDBClient = new DynamoDBClient(this.clientConfig);
     try {
       const params: QueryCommandInput = {
@@ -136,13 +138,13 @@ export class TaxCalculationsService {
       const result = await dynamoDBClient.send(new QueryCommand(params));
       const items = (result.Items || []).map((item) => ({
         calculationId: item.calculationId.S!,
-        status: item.status.S! as ExclusaoPisCofinsStatus,
+        status: item.status.S! as TaxCalculationStatus,
         createdAt: item.createdAt.S!,
         updatedAt: item.updatedAt ? item.updatedAt.S : undefined,
         pdfUrl: item.pdfUrl ? item.pdfUrl.S : undefined,
         fileSize: item.fileSize ? parseInt(item.fileSize.N!) : undefined,
         cnpj: item.cnpj ? item.cnpj.S : undefined,
-        type: TaxCalculationType.ExclusaoPisCofins,
+        calculationType: item.name.S! as TaxCalculationType,
       }));
 
       return {
@@ -152,11 +154,11 @@ export class TaxCalculationsService {
       }
     } catch (error) {
       this.logger.error(`Error fetching jobs for user ${userId}: ${error}`);
-      throw new InternalServerErrorException('Failed to fetch jobs');
+      throw new InternalServerErrorException('Failed to fetch tax calculations');
     }
   }
 
-  async downloadJobResult(
+  async downloadTaxCalculation(
     userId: string,
     calculationId: string,
   ): Promise<{ url: string; fileSize?: number }> {
