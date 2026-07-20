@@ -1,6 +1,6 @@
 export enum TaxCalculationType {
-  ExclusaoPisCofins = 'EXCLUSAO_PIS_COFINS',
-  RevisaoPisCofins  = 'REVISAO_PIS_COFINS'
+  ExclusaoPisCofins = 'exclusao-pis-cofins',
+  RevisaoPisCofins  = 'revisao-pis-cofins'
 }
 
 export enum TaxCalculationStatus {
