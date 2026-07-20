@@ -9,6 +9,7 @@ import {
   Req,
   Query,
   Body,
+  Param,
 } from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { TaxCalculationsService } from 'src/service/tax-calculations.service';
@@ -88,9 +89,14 @@ export class TaxCalculationsController {
   @IsAdmin()
   @UseGuards(JwtAuthGuard)
   @Get(':calculationId/download')
-  async downloadTaxCalculation(@Req() request: Request) {
+  async downloadTaxCalculation(
+    @Req() request: Request,
+    @Param('calculationId') calculationId: string,
+    @Query('calculationType') calculationType: TaxCalculationType,
+  ) {
     const userId = (request as any).user.sub;
-    const calculationId = (request as any).params.calculationId;
-    return await this.taxCalculationsService.downloadTaxCalculation(userId, calculationId);
+    return await this.taxCalculationsService.downloadTaxCalculation(
+      userId, calculationId, calculationType
+    );
   }
 }

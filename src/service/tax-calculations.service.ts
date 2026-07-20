@@ -61,12 +61,11 @@ export class TaxCalculationsService {
 
       for (let index = 0; index < files.length; index++) {
         const file = files[index];
-        const bucketPrefix = `${calculationType.replaceAll('_','-').toLowerCase()}`;
         this.logger.log(`Uploading file ${index + 1}/${files.length}: ${file.originalname}`);
 
         const s3Command = new PutObjectCommand({
           Bucket: 'ez-tax',
-          Key: `${bucketPrefix}/${userId}/${calculationId}/files/${index + 1}_${file.originalname}`,
+          Key: `${calculationType}/${userId}/${calculationId}/files/${index + 1}_${file.originalname}`,
           Body: file.buffer,
           ContentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         });
@@ -161,6 +160,7 @@ export class TaxCalculationsService {
   async downloadTaxCalculation(
     userId: string,
     calculationId: string,
+    calculationType: TaxCalculationType
   ): Promise<{ url: string; fileSize?: number }> {
     this.logger.log(
       `Received download request for calculation ${calculationId}`,
@@ -187,7 +187,7 @@ export class TaxCalculationsService {
 
       const command = new GetObjectCommand({
         Bucket: 'ez-tax',
-        Key: `exclusao-pis-cofins/${userId}/${calculationId}/${item.cnpj.S!}.pdf`,
+        Key: `${calculationType}/${userId}/${calculationId}/${item.cnpj.S!}.pdf`,
       });
 
       const url = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
