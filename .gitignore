@@ -46,6 +46,13 @@ lerna-debug.log*
 .temp
 .tmp
 
+# Terraform
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/terraform.tfvars
+terraform/*.tfplan
+
 # Runtime data
 pids
 *.pid

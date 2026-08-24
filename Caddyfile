@@ -1,0 +1,3 @@
+ez-tax-backend.duckdns.org {
+	reverse_proxy ez-tax-backend:8080
+}
