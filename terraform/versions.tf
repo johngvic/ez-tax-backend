@@ -8,9 +8,13 @@ terraform {
     }
   }
 
-  # Simple local state for a small project. Move to an S3 backend
-  # (with a DynamoDB lock table) once more than one person applies this.
-  # backend "s3" {}
+  backend "s3" {
+    bucket         = "ez-tax-terraform-state"
+    key            = "env:/prod/backend/terraform.tfstate"
+    region         = "sa-east-1"
+    dynamodb_table = "ez-tax-terraform-locks"
+    encrypt        = true
+  }
 }
 
 provider "aws" {

@@ -53,6 +53,10 @@ resource "aws_instance" "app" {
   tags = {
     Name = var.project_name
   }
+
+  lifecycle {
+    ignore_changes = [ami, user_data]
+  }
 }
 
 resource "aws_eip" "app" {

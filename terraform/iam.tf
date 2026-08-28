@@ -40,6 +40,14 @@ resource "aws_iam_role_policy" "app_data_access" {
         Resource = "arn:aws:s3:::${var.s3_bucket_name}"
       },
       {
+        Sid    = "SQSGeneratePdfReportQueue"
+        Effect = "Allow"
+        Action = [
+          "sqs:SendMessage",
+        ]
+        Resource = aws_sqs_queue.generate_pdf_report.arn
+      },
+      {
         Sid    = "DynamoDBTaxTable"
         Effect = "Allow"
         Action = [

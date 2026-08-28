@@ -63,6 +63,7 @@ jobs:
           PORT=8080
           AWS_REGION=sa-east-1
           CORS_ORIGIN=${{ secrets.CORS_ORIGIN }}
+          SQS_GENERATE_PDF_REPORT_QUEUE_URL=${{ secrets.SQS_GENERATE_PDF_REPORT_QUEUE_URL }}
           AUTH_JWKS_URL=${{ secrets.AUTH_JWKS_URL }}
           AUTH_JWT_ISSUER=${{ secrets.AUTH_JWT_ISSUER }}
           CLERK_SECRET_KEY=${{ secrets.CLERK_SECRET_KEY }}
