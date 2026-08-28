@@ -16,7 +16,7 @@ import { TaxCalculationsService } from 'src/service/tax-calculations.service';
 import { memoryStorage } from 'multer';
 import { JwtAuthGuard } from 'src/common/guards/JwtAuthGuard';
 import { IsAdmin } from 'src/common/guards/is-admin.decorator';
-import { TaxCalculationType } from 'src/model/tax-calculations.model';
+import { TaxCalculationType, SaveCalculationRefinementsRequest } from 'src/model/tax-calculations.model';
 
 @Controller('tax-calculations')
 export class TaxCalculationsController {
@@ -97,6 +97,49 @@ export class TaxCalculationsController {
     const userId = (request as any).user.sub;
     return await this.taxCalculationsService.downloadTaxCalculation(
       userId, calculationId, calculationType
+    );
+  }
+
+  @IsAdmin()
+  @UseGuards(JwtAuthGuard)
+  @Get(':calculationId')
+  async getTaxCalculation(
+    @Req() request: Request,
+    @Param('calculationId') calculationId: string,
+  ) {
+    const userId = (request as any).user.sub;
+    return await this.taxCalculationsService.getTaxCalculation(
+      userId, calculationId
+    );
+  }
+
+  @IsAdmin()
+  @UseGuards(JwtAuthGuard)
+  @Get(':calculationType/refinements/:calculationId')
+  async getRawCalculation(
+    @Req() request: Request,
+    @Param('calculationType') calculationType: TaxCalculationType,
+    @Param('calculationId') calculationId: string,
+  ) {
+    const userId = (request as any).user.sub;
+    return await this.taxCalculationsService.getRawCalculation(
+      userId, calculationId, calculationType
+    );
+  }
+
+  @IsAdmin()
+  @UseGuards(JwtAuthGuard)
+  @Post(':calculationType/refinements/:calculationId')
+  async saveCalculationRefinements(
+    @Req() request: Request,
+    @Param('calculationType') calculationType: TaxCalculationType,
+    @Param('calculationId') calculationId: string,
+    @Body() body: SaveCalculationRefinementsRequest,
+  ) {
+    const userId = (request as any).user.sub;
+    const { styled, cnpj, ...reviewedCalculation } = body;
+    return await this.taxCalculationsService.saveCalculationRefinements(
+      userId, calculationId, calculationType, reviewedCalculation, styled, cnpj
     );
   }
 }
