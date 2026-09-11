@@ -13,10 +13,12 @@ import {
   TaxCalculationType,
   ReviewedCalculation,
 } from 'src/model/tax-calculations.model';
-import { PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { PutCommand, UpdateCommand, DeleteCommand } from '@aws-sdk/lib-dynamodb';
 import {
   PutObjectCommand,
   GetObjectCommand,
+  ListObjectsV2Command,
+  DeleteObjectsCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
@@ -244,6 +246,91 @@ export class TaxCalculationsService {
         `Error fetching calculation ${calculationId} for user ${userId}: ${error}`,
       );
       throw new InternalServerErrorException('Failed to fetch calculation');
+    }
+  }
+
+  async deleteTaxCalculation(
+    userId: string,
+    calculationId: string,
+  ): Promise<{ calculationId: string; message: string }> {
+    this.logger.log(
+      `Deleting calculation ${calculationId} for user ${userId}`,
+    );
+
+    const dynamoDBClient = new DynamoDBClient(this.clientConfig);
+    const s3Client = new S3Client(this.clientConfig);
+
+    try {
+      const params = {
+        TableName: 'tax-calculations',
+        KeyConditionExpression:
+          'userId = :userId AND calculationId = :calculationId',
+        ExpressionAttributeValues: {
+          ':userId': { S: userId },
+          ':calculationId': { S: calculationId },
+        },
+      };
+      const data = await dynamoDBClient.send(new QueryCommand(params));
+      const item = data.Items?.[0];
+
+      if (!item) {
+        throw new NotFoundException('Calculation not found');
+      }
+
+      const calculationType = item.name.S! as TaxCalculationType;
+      const prefix = `${calculationType}/${userId}/${calculationId}/`;
+
+      let continuationToken: string | undefined;
+      do {
+        const listResult = await s3Client.send(
+          new ListObjectsV2Command({
+            Bucket: 'ez-tax',
+            Prefix: prefix,
+            ContinuationToken: continuationToken,
+          }),
+        );
+
+        const objects = listResult.Contents ?? [];
+        if (objects.length > 0) {
+          await s3Client.send(
+            new DeleteObjectsCommand({
+              Bucket: 'ez-tax',
+              Delete: {
+                Objects: objects.map((obj) => ({ Key: obj.Key! })),
+              },
+            }),
+          );
+        }
+
+        continuationToken = listResult.IsTruncated
+          ? listResult.NextContinuationToken
+          : undefined;
+      } while (continuationToken);
+
+      await dynamoDBClient.send(
+        new DeleteCommand({
+          TableName: 'tax-calculations',
+          Key: { userId, calculationId },
+        }),
+      );
+
+      this.logger.log(
+        `Calculation ${calculationId} deleted for user ${userId}`,
+      );
+
+      return {
+        calculationId,
+        message: 'Calculation deleted successfully',
+      };
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+
+      this.logger.error(
+        `Error deleting calculation ${calculationId} for user ${userId}: ${error}`,
+      );
+      throw new InternalServerErrorException('Failed to delete calculation');
     }
   }
 
