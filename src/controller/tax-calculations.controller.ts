@@ -5,6 +5,7 @@ import {
   UploadedFiles,
   BadRequestException,
   Get,
+  Delete,
   UseGuards,
   Req,
   Query,
@@ -109,6 +110,19 @@ export class TaxCalculationsController {
   ) {
     const userId = (request as any).user.sub;
     return await this.taxCalculationsService.getTaxCalculation(
+      userId, calculationId
+    );
+  }
+
+  @IsAdmin()
+  @UseGuards(JwtAuthGuard)
+  @Delete(':calculationId')
+  async deleteTaxCalculation(
+    @Req() request: Request,
+    @Param('calculationId') calculationId: string,
+  ) {
+    const userId = (request as any).user.sub;
+    return await this.taxCalculationsService.deleteTaxCalculation(
       userId, calculationId
     );
   }
