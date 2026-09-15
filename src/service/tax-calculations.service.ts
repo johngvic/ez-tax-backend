@@ -113,18 +113,57 @@ export class TaxCalculationsService {
     userId: string,
     limit: number = 10,
     exclusiveStartKey?: string,
+    calculationId?: string,
+    cnpj?: string,
+    calculationType?: TaxCalculationType,
+    status?: TaxCalculationStatus,
   ): Promise<TaxCalculationResponse> {
     const dynamoDBClient = new DynamoDBClient(this.clientConfig);
     try {
+      let keyConditionExpression = 'userId = :userId';
+      const expressionAttributeValues: Record<string, { S: string }> = {
+        ':userId': { S: userId },
+      };
+      const expressionAttributeNames: Record<string, string> = {};
+      const filterExpressions: string[] = [];
+
+      if (calculationId) {
+        keyConditionExpression += ' AND calculationId = :calculationId';
+        expressionAttributeValues[':calculationId'] = { S: calculationId };
+      }
+
+      if (cnpj) {
+        filterExpressions.push('cnpj = :cnpj');
+        expressionAttributeValues[':cnpj'] = { S: cnpj };
+      }
+
+      if (calculationType) {
+        filterExpressions.push('#name = :calculationType');
+        expressionAttributeNames['#name'] = 'name';
+        expressionAttributeValues[':calculationType'] = { S: calculationType };
+      }
+
+      if (status) {
+        filterExpressions.push('#status = :status');
+        expressionAttributeNames['#status'] = 'status';
+        expressionAttributeValues[':status'] = { S: status };
+      }
+
       const params: QueryCommandInput = {
         TableName: 'tax-calculations',
-        KeyConditionExpression: 'userId = :userId',
-        ExpressionAttributeValues: {
-          ':userId': { S: userId },
-        },
+        KeyConditionExpression: keyConditionExpression,
+        ExpressionAttributeValues: expressionAttributeValues,
         Limit: limit,
         ScanIndexForward: false,
       };
+
+      if (filterExpressions.length > 0) {
+        params.FilterExpression = filterExpressions.join(' AND ');
+      }
+
+      if (Object.keys(expressionAttributeNames).length > 0) {
+        params.ExpressionAttributeNames = expressionAttributeNames;
+      }
 
       if (exclusiveStartKey) {
         try {
