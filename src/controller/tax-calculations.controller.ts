@@ -17,7 +17,7 @@ import { TaxCalculationsService } from 'src/service/tax-calculations.service';
 import { memoryStorage } from 'multer';
 import { JwtAuthGuard } from 'src/common/guards/JwtAuthGuard';
 import { IsAdmin } from 'src/common/guards/is-admin.decorator';
-import { TaxCalculationType, SaveCalculationRefinementsRequest } from 'src/model/tax-calculations.model';
+import { TaxCalculationType, TaxCalculationStatus, SaveCalculationRefinementsRequest } from 'src/model/tax-calculations.model';
 
 @Controller('tax-calculations')
 export class TaxCalculationsController {
@@ -39,6 +39,10 @@ export class TaxCalculationsController {
     @Req() request: Request,
     @Query('limit') limit?: string,
     @Query('exclusiveStartKey') exclusiveStartKey?: string,
+    @Query('calculationId') calculationId?: string,
+    @Query('cnpj') cnpj?: string,
+    @Query('calculationType') calculationType?: TaxCalculationType,
+    @Query('status') status?: TaxCalculationStatus,
   ) {
     const userId = (request as any).user.sub;
     const parsedLimit = limit ? Number(limit) : 10;
@@ -51,6 +55,10 @@ export class TaxCalculationsController {
       userId,
       parsedLimit,
       exclusiveStartKey,
+      calculationId,
+      cnpj,
+      calculationType,
+      status,
     );
   }
 
