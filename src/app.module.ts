@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { TaxCalculationsModule } from './modules/tax-calculations.module';
 import { MulterModule } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
+import { HealthController } from './controller/health.controller';
 
 @Module({
   imports: [
@@ -12,7 +13,7 @@ import { memoryStorage } from 'multer';
       storage: memoryStorage(),
     }),
   ],
-  controllers: [],
+  controllers: [HealthController],
   providers: [],
 })
 export class AppModule {}

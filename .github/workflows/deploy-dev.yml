@@ -1,0 +1,42 @@
+name: Deploy (dev)
+
+# Any branch except main deploys to the dev backend on Render.
+# main deploys to production (EC2) via deploy.yml.
+on:
+  push:
+    branches-ignore: [main]
+
+# Dev is a single shared environment: the most recent push wins, and an
+# older run still in progress is cancelled so it can't overwrite a newer one.
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build
+      - run: npx jest --passWithNoTests
+
+  # Render builds the image itself from the Dockerfile (amd64, so the
+  # arm64 build in deploy.yml doesn't apply here). `ref` pins the exact
+  # commit, whatever branch it came from. Auto-Deploy must be OFF on the
+  # Render service so only commits that passed `check` get deployed.
+  deploy:
+    needs: check
+    runs-on: ubuntu-latest
+    environment: development
+    steps:
+      - name: Trigger Render deploy hook
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: curl -fsS -X POST "${RENDER_DEPLOY_HOOK_URL}&ref=${{ github.sha }}"

@@ -2,18 +2,21 @@ import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
 import { decode } from 'jsonwebtoken';
 import { JwtService } from '@nestjs/jwt';
 import * as jwksRsa from 'jwks-rsa';
+import { requireEnv } from 'src/common/config/env';
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
   private jwtService: JwtService;
   private jwksClient: jwksRsa.JwksClient;
+  // Required: an empty issuer makes jsonwebtoken skip the `iss` check entirely.
+  private readonly issuer = requireEnv('AUTH_JWT_ISSUER');
 
   constructor() {
     this.jwksClient = jwksRsa({
       cache: true,
       rateLimit: true,
       jwksRequestsPerMinute: 5,
-      jwksUri: process.env.AUTH_JWKS_URL || '',
+      jwksUri: requireEnv('AUTH_JWKS_URL'),
     });
 
     this.jwtService = new JwtService({
@@ -39,7 +42,7 @@ export class JwtAuthGuard implements CanActivate {
 
     try {
       const payload = await this.jwtService.verifyAsync(token, {
-        issuer: process.env.AUTH_ISSUER || '',
+        issuer: this.issuer,
       });
 
       request.user = {
