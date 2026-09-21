@@ -30,6 +30,7 @@ import {
   QueryCommandInput,
 } from '@aws-sdk/client-dynamodb';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
+import { requireEnv } from 'src/common/config/env';
 
 @Injectable()
 export class TaxCalculationsService {
@@ -38,6 +39,9 @@ export class TaxCalculationsService {
   clientConfig = {
     region: process.env.AWS_REGION,
   };
+
+  private readonly bucketName = requireEnv('S3_BUCKET_NAME');
+  private readonly tableName = requireEnv('DYNAMODB_TABLE_NAME');
 
   private readonly logger = new Logger(TaxCalculationsService.name);
 
@@ -66,7 +70,7 @@ export class TaxCalculationsService {
         this.logger.log(`Uploading file ${index + 1}/${files.length}: ${file.originalname}`);
 
         const s3Command = new PutObjectCommand({
-          Bucket: 'ez-tax',
+          Bucket: this.bucketName,
           Key: `${calculationType}/${userId}/${calculationId}/files/${index + 1}_${file.originalname}`,
           Body: file.buffer,
           ContentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -80,7 +84,7 @@ export class TaxCalculationsService {
       }
 
       const dynamoDBCommand = new PutCommand({
-        TableName: 'tax-calculations',
+        TableName: this.tableName,
         Item: {
           userId,
           calculationId,
@@ -152,7 +156,7 @@ export class TaxCalculationsService {
       }
 
       const params: QueryCommandInput = {
-        TableName: 'tax-calculations',
+        TableName: this.tableName,
         KeyConditionExpression: keyConditionExpression,
         ExpressionAttributeValues: expressionAttributeValues,
         Limit: limit,
@@ -211,7 +215,7 @@ export class TaxCalculationsService {
     const dynamoDBClient = new DynamoDBClient(this.clientConfig);
     try {
       const params = {
-        TableName: 'tax-calculations',
+        TableName: this.tableName,
         KeyConditionExpression:
           'userId = :userId AND calculationId = :calculationId',
         ExpressionAttributeValues: {
@@ -227,7 +231,7 @@ export class TaxCalculationsService {
       }
 
       const command = new GetObjectCommand({
-        Bucket: 'ez-tax',
+        Bucket: this.bucketName,
         Key: `${calculationType}/${userId}/${calculationId}/${item.cnpj.S!}.pdf`,
       });
 
@@ -252,7 +256,7 @@ export class TaxCalculationsService {
     const dynamoDBClient = new DynamoDBClient(this.clientConfig);
     try {
       const params = {
-        TableName: 'tax-calculations',
+        TableName: this.tableName,
         KeyConditionExpression:
           'userId = :userId AND calculationId = :calculationId',
         ExpressionAttributeValues: {
@@ -303,7 +307,7 @@ export class TaxCalculationsService {
 
     try {
       const params = {
-        TableName: 'tax-calculations',
+        TableName: this.tableName,
         KeyConditionExpression:
           'userId = :userId AND calculationId = :calculationId',
         ExpressionAttributeValues: {
@@ -325,7 +329,7 @@ export class TaxCalculationsService {
       do {
         const listResult = await s3Client.send(
           new ListObjectsV2Command({
-            Bucket: 'ez-tax',
+            Bucket: this.bucketName,
             Prefix: prefix,
             ContinuationToken: continuationToken,
           }),
@@ -335,7 +339,7 @@ export class TaxCalculationsService {
         if (objects.length > 0) {
           await s3Client.send(
             new DeleteObjectsCommand({
-              Bucket: 'ez-tax',
+              Bucket: this.bucketName,
               Delete: {
                 Objects: objects.map((obj) => ({ Key: obj.Key! })),
               },
@@ -350,7 +354,7 @@ export class TaxCalculationsService {
 
       await dynamoDBClient.send(
         new DeleteCommand({
-          TableName: 'tax-calculations',
+          TableName: this.tableName,
           Key: { userId, calculationId },
         }),
       );
@@ -420,7 +424,7 @@ export class TaxCalculationsService {
 
       await s3Client.send(
         new PutObjectCommand({
-          Bucket: 'ez-tax',
+          Bucket: this.bucketName,
           Key: reviewedKey,
           Body: JSON.stringify(reviewedCalculation),
           ContentType: 'application/json',
@@ -477,7 +481,7 @@ export class TaxCalculationsService {
     try {
       const result = await dynamoDBClient.send(
         new UpdateCommand({
-          TableName: 'tax-calculations',
+          TableName: this.tableName,
           Key: { userId, calculationId },
           UpdateExpression: 'SET #status = :processing, updatedAt = :updatedAt',
           ConditionExpression: 'attribute_exists(calculationId) AND #status IN (:waitingReview, :completed)',
@@ -514,7 +518,7 @@ export class TaxCalculationsService {
     try {
       await dynamoDBClient.send(
         new UpdateCommand({
-          TableName: 'tax-calculations',
+          TableName: this.tableName,
           Key: { userId, calculationId },
           UpdateExpression: 'SET #status = :status, updatedAt = :updatedAt',
           ExpressionAttributeNames: { '#status': 'status' },
@@ -531,8 +535,8 @@ export class TaxCalculationsService {
     try {
       await s3Client.send(
         new CopyObjectCommand({
-          Bucket: 'ez-tax',
-          CopySource: `ez-tax/${encodeURIComponent(reviewedKey).replace(/%2F/g, '/')}`,
+          Bucket: this.bucketName,
+          CopySource: `${this.bucketName}/${encodeURIComponent(reviewedKey).replace(/%2F/g, '/')}`,
           Key: `${calculationPrefix}/reviewed-history/${new Date().toISOString().replace(/[:.]/g, '-')}.json`,
         }),
       );
@@ -555,7 +559,7 @@ export class TaxCalculationsService {
     const s3Client = new S3Client(this.clientConfig);
     try {
       const command = new GetObjectCommand({
-        Bucket: 'ez-tax',
+        Bucket: this.bucketName,
         Key: `${calculationType}/${userId}/${calculationId}/calculation.json`,
       });
 
@@ -591,7 +595,7 @@ export class TaxCalculationsService {
     const s3Client = new S3Client(this.clientConfig);
     try {
       const command = new GetObjectCommand({
-        Bucket: 'ez-tax',
+        Bucket: this.bucketName,
         Key: `${calculationType}/${userId}/${calculationId}/reviewed.json`,
       });
 
