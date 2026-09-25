@@ -151,6 +151,20 @@ export class TaxCalculationsController {
 
   @IsAdmin()
   @UseGuards(JwtAuthGuard)
+  @Get(':calculationType/refinements/:calculationId/audit')
+  async getRefinementAudit(
+    @Req() request: Request,
+    @Param('calculationType') calculationType: TaxCalculationType,
+    @Param('calculationId') calculationId: string,
+  ) {
+    const userId = (request as any).user.sub;
+    return await this.taxCalculationsService.getRefinementAudit(
+      userId, calculationId, calculationType
+    );
+  }
+
+  @IsAdmin()
+  @UseGuards(JwtAuthGuard)
   @Post(':calculationType/refinements/:calculationId')
   async saveCalculationRefinements(
     @Req() request: Request,
