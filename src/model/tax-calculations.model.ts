@@ -7,6 +7,7 @@ export enum TaxCalculationType {
 export enum TaxCalculationStatus {
   Pending = 'PENDING',
   Processing = 'PROCESSING',
+  WaitingReview = 'WAITING_REVIEW',
   Completed = 'COMPLETED',
   Failed = 'FAILED',
 }
@@ -38,6 +39,10 @@ export interface CalculationMerge {
   resultLabel: string;
   resultValues: number[];
   sourceRows: ReportDataRow[];
+  /** v2+: alinhado com sourceRows — edição sofrida pela natureza de origem antes da unificação (ou null). */
+  sourceEdits?: (CalculationEdit | null)[];
+  /** v2+: alinhado com sourceRows — true quando a natureza de origem foi adicionada manualmente. */
+  sourceIsManual?: boolean[];
   recoveredBalance: number;
   riskLevel?: RiskLevel;
 }
@@ -49,7 +54,10 @@ export interface RowSnapshot {
   riskLevel?: RiskLevel;
 }
 
-export type CalculationManualInsertion = RowSnapshot;
+export interface CalculationManualInsertion extends RowSnapshot {
+  /** v2+: nome da unificação em que a natureza adicionada entrou. */
+  mergedInto?: string;
+}
 
 export interface CalculationEdit {
   rowId: string;
@@ -57,11 +65,36 @@ export interface CalculationEdit {
   after: RowSnapshot;
 }
 
+/** Linha da tela de refinamento, como o front a mantém (unificações carregam as linhas de origem em `parts`). */
+export interface RefinementStateRow {
+  rowId: string;
+  label: string;
+  values: number[];
+  merged: boolean;
+  originalIndexes: number[];
+  parts?: RefinementStateRow[];
+  recoveredBalance?: number;
+  grossValues?: number[];
+  riskLevel?: RiskLevel;
+  isManual?: boolean;
+}
+
+/** Estado restaurável da tela de refinamento (v2): permite reabrir o cálculo para edição. */
+export interface RefinementState {
+  rows: RefinementStateRow[];
+  deletedRows: RefinementStateRow[];
+  edits: Record<string, CalculationEdit>;
+}
+
 export interface ReviewedCalculationAudit {
+  /** Ausente nos refinamentos antigos (v1), que só podem ser visualizados. */
+  version?: number;
+  importedCount?: number;
   merges: CalculationMerge[];
   manualInsertions: CalculationManualInsertion[];
   edits: CalculationEdit[];
   excludedRows: ReportDataRow[];
+  state?: RefinementState;
 }
 
 export interface ReviewedCalculation {

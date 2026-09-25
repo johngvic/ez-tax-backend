@@ -4,6 +4,7 @@ import {
   InternalServerErrorException,
   NotFoundException,
   BadRequestException,
+  ConflictException,
 } from '@nestjs/common';
 import { ulid } from 'ulid';
 import {
@@ -16,6 +17,7 @@ import {
 import { PutCommand, UpdateCommand, DeleteCommand } from '@aws-sdk/lib-dynamodb';
 import {
   PutObjectCommand,
+  CopyObjectCommand,
   GetObjectCommand,
   ListObjectsV2Command,
   DeleteObjectsCommand,
@@ -397,52 +399,52 @@ export class TaxCalculationsService {
     const sqsClient = new SQSClient(this.clientConfig);
     const dynamoDBClient = new DynamoDBClient(this.clientConfig);
 
+    const queueUrl = process.env.SQS_GENERATE_PDF_REPORT_QUEUE_URL;
+    if (!queueUrl) {
+      throw new InternalServerErrorException(
+        'PDF generation queue is not configured',
+      );
+    }
+
+    const reviewedKey = `${calculationType}/${userId}/${calculationId}/reviewed.json`;
+
+    // trava atômica: só aceita refinamento (WAITING_REVIEW) ou edição de um cálculo concluído (COMPLETED).
+    // Em processamento/falha, ou com dois envios simultâneos, a condição falha e nada é gravado
+    const previousStatus = await this.lockCalculationForRefinement(dynamoDBClient, userId, calculationId);
+
     try {
-      const putCommand = new PutObjectCommand({
-        Bucket: 'ez-tax',
-        Key: `${calculationType}/${userId}/${calculationId}/reviewed.json`,
-        Body: JSON.stringify(reviewedCalculation),
-        ContentType: 'application/json',
-      });
-
-      await s3Client.send(putCommand);
-
-      const queueUrl = process.env.SQS_GENERATE_PDF_REPORT_QUEUE_URL;
-      if (!queueUrl) {
-        throw new InternalServerErrorException(
-          'PDF generation queue is not configured',
-        );
+      // edição: guarda o refinamento anterior antes de sobrescrever (se a regeração falhar, nada se perde)
+      if (previousStatus === TaxCalculationStatus.Completed) {
+        await this.backupReviewedCalculation(s3Client, reviewedKey, `${calculationType}/${userId}/${calculationId}`);
       }
 
-      const sendMessageCommand = new SendMessageCommand({
-        QueueUrl: queueUrl,
-        MessageBody: JSON.stringify({
-          userId,
-          calculationId,
-          calculationType,
-          result: reviewedCalculation.reportTable,
-          styled,
-          cnpj,
+      await s3Client.send(
+        new PutObjectCommand({
+          Bucket: 'ez-tax',
+          Key: reviewedKey,
+          Body: JSON.stringify(reviewedCalculation),
+          ContentType: 'application/json',
         }),
-      });
+      );
 
-      await sqsClient.send(sendMessageCommand);
-
-      await dynamoDBClient.send(
-        new UpdateCommand({
-          TableName: 'tax-calculations',
-          Key: { userId, calculationId },
-          UpdateExpression: 'SET #status = :status, updatedAt = :updatedAt',
-          ExpressionAttributeNames: { '#status': 'status' },
-          ExpressionAttributeValues: {
-            ':status': TaxCalculationStatus.Processing,
-            ':updatedAt': new Date().toISOString(),
-          },
+      // a lambda de relatório gera o PDF a partir do reportTable da mensagem (sobrescrevendo o anterior, na edição)
+      // e marca o cálculo como COMPLETED
+      await sqsClient.send(
+        new SendMessageCommand({
+          QueueUrl: queueUrl,
+          MessageBody: JSON.stringify({
+            userId,
+            calculationId,
+            calculationType,
+            result: reviewedCalculation.reportTable,
+            styled,
+            cnpj,
+          }),
         }),
       );
 
       this.logger.log(
-        `Reviewed calculation saved and PDF generation queued for ${calculationId}`,
+        `Reviewed calculation saved and PDF generation queued for ${calculationId} (${previousStatus === TaxCalculationStatus.Completed ? 'edit' : 'refinement'})`,
       );
 
       return {
@@ -450,6 +452,9 @@ export class TaxCalculationsService {
         message: 'Calculation refinement submitted successfully',
       };
     } catch (error) {
+      // nada foi enfileirado: devolve o status anterior para o cálculo não ficar preso em PROCESSING
+      await this.restoreCalculationStatus(dynamoDBClient, userId, calculationId, previousStatus);
+
       if (error instanceof BadRequestException || error instanceof InternalServerErrorException) {
         throw error;
       }
@@ -458,6 +463,83 @@ export class TaxCalculationsService {
         `Error saving reviewed calculation for user ${userId} and calculation ${calculationId}: ${error}`,
       );
       throw new InternalServerErrorException('Failed to save calculation refinements');
+    }
+  }
+
+  private static readonly REFINABLE_STATUSES = [TaxCalculationStatus.WaitingReview, TaxCalculationStatus.Completed];
+
+  /** Marca o cálculo como PROCESSING se ele estiver em um status refinável e devolve o status anterior. */
+  private async lockCalculationForRefinement(
+    dynamoDBClient: DynamoDBClient,
+    userId: string,
+    calculationId: string,
+  ): Promise<TaxCalculationStatus> {
+    try {
+      const result = await dynamoDBClient.send(
+        new UpdateCommand({
+          TableName: 'tax-calculations',
+          Key: { userId, calculationId },
+          UpdateExpression: 'SET #status = :processing, updatedAt = :updatedAt',
+          ConditionExpression: 'attribute_exists(calculationId) AND #status IN (:waitingReview, :completed)',
+          ExpressionAttributeNames: { '#status': 'status' },
+          ExpressionAttributeValues: {
+            ':processing': TaxCalculationStatus.Processing,
+            ':waitingReview': TaxCalculationStatus.WaitingReview,
+            ':completed': TaxCalculationStatus.Completed,
+            ':updatedAt': new Date().toISOString(),
+          },
+          ReturnValues: 'ALL_OLD',
+        }),
+      );
+      return result.Attributes?.status as TaxCalculationStatus;
+    } catch (error) {
+      if ((error as { name?: string })?.name !== 'ConditionalCheckFailedException') throw error;
+
+      const current = await this.getTaxCalculation(userId, calculationId);
+      if (current.status === TaxCalculationStatus.Processing) {
+        throw new ConflictException('Calculation is already being processed');
+      }
+      throw new ConflictException(
+        `Calculation cannot be refined in status ${current.status}; expected ${TaxCalculationsService.REFINABLE_STATUSES.join(' or ')}`,
+      );
+    }
+  }
+
+  private async restoreCalculationStatus(
+    dynamoDBClient: DynamoDBClient,
+    userId: string,
+    calculationId: string,
+    status: TaxCalculationStatus,
+  ): Promise<void> {
+    try {
+      await dynamoDBClient.send(
+        new UpdateCommand({
+          TableName: 'tax-calculations',
+          Key: { userId, calculationId },
+          UpdateExpression: 'SET #status = :status, updatedAt = :updatedAt',
+          ExpressionAttributeNames: { '#status': 'status' },
+          ExpressionAttributeValues: { ':status': status, ':updatedAt': new Date().toISOString() },
+        }),
+      );
+    } catch (error) {
+      this.logger.error(`Failed to restore status ${status} for calculation ${calculationId}: ${error}`);
+    }
+  }
+
+  /** Copia o reviewed.json atual para reviewed-history/{timestamp}.json antes de uma edição sobrescrevê-lo. */
+  private async backupReviewedCalculation(s3Client: S3Client, reviewedKey: string, calculationPrefix: string): Promise<void> {
+    try {
+      await s3Client.send(
+        new CopyObjectCommand({
+          Bucket: 'ez-tax',
+          CopySource: `ez-tax/${encodeURIComponent(reviewedKey).replace(/%2F/g, '/')}`,
+          Key: `${calculationPrefix}/reviewed-history/${new Date().toISOString().replace(/[:.]/g, '-')}.json`,
+        }),
+      );
+    } catch (error) {
+      // sem refinamento anterior salvo não há o que guardar
+      if ((error as { name?: string })?.name === 'NoSuchKey') return;
+      throw error;
     }
   }
 
@@ -494,6 +576,46 @@ export class TaxCalculationsService {
         `Error fetching refinements for user ${userId} and calculation ${calculationId}: ${error}`,
       );
       throw new InternalServerErrorException('Failed to fetch calculation refinements');
+    }
+  }
+
+  async getRefinementAudit(
+    userId: string,
+    calculationId: string,
+    calculationType: TaxCalculationType,
+  ): Promise<ReviewedCalculation> {
+    this.logger.log(
+      `Received refinement audit request for calculation ${calculationId}`,
+    );
+
+    const s3Client = new S3Client(this.clientConfig);
+    try {
+      const command = new GetObjectCommand({
+        Bucket: 'ez-tax',
+        Key: `${calculationType}/${userId}/${calculationId}/reviewed.json`,
+      });
+
+      const response = await s3Client.send(command);
+      const body = await response.Body?.transformToString();
+
+      if (!body) {
+        throw new NotFoundException('Refinement file not found');
+      }
+
+      return JSON.parse(body);
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+
+      if ((error as { name?: string })?.name === 'NoSuchKey') {
+        throw new NotFoundException('Refinement file not found');
+      }
+
+      this.logger.error(
+        `Error fetching refinement audit for user ${userId} and calculation ${calculationId}: ${error}`,
+      );
+      throw new InternalServerErrorException('Failed to fetch refinement audit');
     }
   }
 }
