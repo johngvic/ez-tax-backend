@@ -40,7 +40,7 @@ variable "ssh_ingress_cidr" {
 }
 
 variable "cors_origin" {
-  description = "Allowed CORS origin for the API"
+  description = "Allowed CORS origins for the API (comma-separated; `*` matches one subdomain label)"
   type        = string
 }
 
