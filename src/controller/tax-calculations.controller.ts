@@ -2,7 +2,7 @@ import {
   Controller,
   Post,
   UseInterceptors,
-  UploadedFiles,
+  UploadedFile,
   BadRequestException,
   Get,
   Delete,
@@ -12,9 +12,11 @@ import {
   Body,
   Param,
 } from '@nestjs/common';
-import { FilesInterceptor } from '@nestjs/platform-express';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { TaxCalculationsService } from 'src/service/tax-calculations.service';
-import { memoryStorage } from 'multer';
+import { diskStorage } from 'multer';
+import { rm } from 'fs/promises';
+import { tmpdir } from 'os';
 import { JwtAuthGuard } from 'src/common/guards/JwtAuthGuard';
 import { IsAdmin } from 'src/common/guards/is-admin.decorator';
 import { TaxCalculationType, TaxCalculationStatus, SaveCalculationRefinementsRequest } from 'src/model/tax-calculations.model';
@@ -65,34 +67,32 @@ export class TaxCalculationsController {
   @IsAdmin()
   @UseGuards(JwtAuthGuard)
   @Post()
-  @UseInterceptors(FilesInterceptor('files', 5, { storage: memoryStorage() }))
+  // a planilha pode ter vários GB: vai para um arquivo temporário em disco, não para a memória
+  @UseInterceptors(FileInterceptor('file', { storage: diskStorage({ destination: tmpdir() }) }))
   async runTaxCalculation(
     @Req() request: Request,
-    @UploadedFiles() files: Express.Multer.File[],
+    @UploadedFile() file: Express.Multer.File,
     @Body('styled') isStyled: string,
     @Body('calculationType') calculationType: string,
   ) {
-    if (!files || files.length === 0) throw new BadRequestException('At least one file is required');
-    if (files.length > 5) throw new BadRequestException('Maximum 5 files allowed');
-    
-    for (const file of files) {
-      if (
-        !file.originalname ||
-        !file.originalname.toLowerCase().endsWith('.xlsx')
-      ) {
+    try {
+      if (!file) throw new BadRequestException('A .xlsx file is required');
+      if (!file.originalname || !file.originalname.toLowerCase().endsWith('.xlsx')) {
         throw new BadRequestException('Only .xlsx files are allowed');
       }
+
+      const userId = (request as any).user.sub;
+      const styled = isStyled === 'true';
+
+      return await this.taxCalculationsService.runTaxCalculation(
+        userId,
+        file,
+        styled,
+        calculationType as TaxCalculationType
+      );
+    } finally {
+      if (file) await rm(file.path, { force: true });
     }
-
-    const userId = (request as any).user.sub;
-    const styled = isStyled === 'true';
-
-    return await this.taxCalculationsService.runTaxCalculation(
-      userId,
-      files,
-      styled,
-      calculationType as TaxCalculationType
-    );
   }
 
   @IsAdmin()

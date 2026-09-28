@@ -24,6 +24,8 @@ import {
   S3Client,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { Upload } from '@aws-sdk/lib-storage';
+import { createReadStream } from 'fs';
 import {
   DynamoDBClient,
   QueryCommand,
@@ -31,6 +33,17 @@ import {
 } from '@aws-sdk/client-dynamodb';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import { requireEnv } from 'src/common/config/env';
+
+function formatFileSize(bytes: number): string {
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let size = bytes;
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024;
+    unit++;
+  }
+  return `${unit === 0 ? size : size.toFixed(1)} ${units[unit]}`;
+}
 
 @Injectable()
 export class TaxCalculationsService {
@@ -45,15 +58,15 @@ export class TaxCalculationsService {
 
   private readonly logger = new Logger(TaxCalculationsService.name);
 
+  private static readonly UPLOAD_PART_SIZE = 16 * 1024 * 1024;
+
   async runTaxCalculation(
     userId: string,
-    files: Express.Multer.File[],
+    file: Express.Multer.File,
     styled: boolean,
     calculationType: TaxCalculationType
   ): Promise<TaxCalculation> {
-    this.logger.log(
-      `Received ${files.length} file(s): ${files.map((f) => f.originalname).join(', ')}`,
-    );
+    this.logger.log(`Received file ${file.originalname} (${formatFileSize(file.size)})`);
     const dynamoDBClient = new DynamoDBClient(this.clientConfig);
     const s3Client = new S3Client(this.clientConfig);
 
@@ -61,36 +74,30 @@ export class TaxCalculationsService {
       const calculationId = ulid();
       const createdAt = new Date().toISOString();
       const status = TaxCalculationStatus.Pending;
-      
-      const fileData: Array<{ filename: string; size: number }> = [];
-      const totalSize = files.reduce((sum, f) => sum + f.size, 0);
 
-      for (let index = 0; index < files.length; index++) {
-        const file = files[index];
-        this.logger.log(`Uploading file ${index + 1}/${files.length}: ${file.originalname}`);
-
-        const s3Command = new PutObjectCommand({
+      // multipart: envia em partes com retry por parte e aceita arquivos acima de 5GB (limite do PutObject)
+      const upload = new Upload({
+        client: s3Client,
+        params: {
           Bucket: this.bucketName,
-          Key: `${calculationType}/${userId}/${calculationId}/files/${index + 1}_${file.originalname}`,
-          Body: file.buffer,
+          Key: `${calculationType}/${userId}/${calculationId}/input.xlsx`,
+          Body: createReadStream(file.path),
           ContentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        });
+        },
+        partSize: TaxCalculationsService.UPLOAD_PART_SIZE,
+        queueSize: 4,
+      });
+      await upload.done();
 
-        await s3Client.send(s3Command);
-        fileData.push({
-          filename: file.originalname,
-          size: file.size,
-        });
-      }
-
+      // o registro só é criado depois do upload completo, então o cálculo nunca começa sem o arquivo
       const dynamoDBCommand = new PutCommand({
         TableName: this.tableName,
         Item: {
           userId,
           calculationId,
           name: calculationType,
-          fileCount: files.length,
-          fileSize: totalSize,
+          fileName: file.originalname,
+          fileSize: file.size,
           styled,
           status,
           createdAt,
@@ -99,7 +106,7 @@ export class TaxCalculationsService {
 
       await dynamoDBClient.send(dynamoDBCommand);
 
-      this.logger.log(`Record and ${files.length} file(s) saved for: ${calculationId}`);
+      this.logger.log(`Record and file saved for: ${calculationId}`);
 
       return {
         calculationId,
@@ -189,6 +196,7 @@ export class TaxCalculationsService {
         fileSize: item.fileSize ? parseInt(item.fileSize.N!) : undefined,
         cnpj: item.cnpj ? item.cnpj.S : undefined,
         calculationType: item.name.S! as TaxCalculationType,
+        errorReason: item.errorReason ? item.errorReason.S : undefined,
       }));
 
       return {
@@ -280,6 +288,7 @@ export class TaxCalculationsService {
         fileSize: item.fileSize ? parseInt(item.fileSize.N!) : undefined,
         cnpj: item.cnpj ? item.cnpj.S : undefined,
         calculationType: item.name.S! as TaxCalculationType,
+        errorReason: item.errorReason ? item.errorReason.S : undefined,
         styled: item.styled ? item.styled.BOOL : undefined
       };
     } catch (error) {

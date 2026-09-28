@@ -21,6 +21,8 @@ export interface TaxCalculation {
   updatedAt?: string;
   cnpj?: string;
   calculationType: TaxCalculationType;
+  /** Motivo da falha (ex.: WORKSHEET_HEADER_MISMATCH); só existe com status FAILED */
+  errorReason?: string;
   styled?: boolean;
 }
 
